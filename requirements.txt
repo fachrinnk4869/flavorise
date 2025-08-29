@@ -5,3 +5,13 @@ lxml
 pandas
 numpy
 matplotlib
+pinecone
+pinecone_text
+tenacity
+httpx
+pinecone[grpc]
+langchain_openai
+langchain
+fastapi[standard]
+# requests
+# uvicorn[standard]
