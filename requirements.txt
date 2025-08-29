@@ -5,3 +5,6 @@ lxml
 sentence_transformers
 gradio 
 pillow
+pandas
+numpy
+matplotlib
