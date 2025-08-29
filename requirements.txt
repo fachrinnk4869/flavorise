@@ -2,3 +2,6 @@ playwright
 requests
 beautifulsoup4
 lxml
+sentence_transformers
+gradio 
+pillow
