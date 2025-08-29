@@ -2,3 +2,6 @@ playwright
 requests
 beautifulsoup4
 lxml
+pandas
+numpy
+matplotlib
