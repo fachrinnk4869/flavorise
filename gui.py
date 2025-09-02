@@ -1,43 +1,128 @@
+import json
 import gradio as gr
+from AlgorithmClass import AlgorithmClass
+from helper import MultimodalModel
+algorithm = AlgorithmClass()
 
-# Define the recipe steps as a list of dictionaries.
-# Each dictionary contains the image path and the text for that step.
-recipe_steps = [
-    {
-        "image": "https://img.freepik.com/free-photo/closeup-scarlet-macaw-from-side-view-scarlet-macaw-closeup-head_488145-3540.jpg?semt=ais_hybrid&w=740&q=80",
-        "text": "### Step 1: Gather Ingredients 🥬 \n\nBefore you start, make sure you have all your ingredients ready. This includes fresh vegetables, a protein source (like chicken or tofu), and your favorite dressing.",
-    },
-    {
-        "image": "https://img.freepik.com/free-photo/closeup-scarlet-macaw-from-side-view-scarlet-macaw-closeup-head_488145-3540.jpg?semt=ais_hybrid&w=740&q=80",
-        "text": "### Step 2: Prepare the Vegetables 🔪 \n\nWash and chop your vegetables. A good dice or julienne can make a big difference in the texture and presentation of the salad. For example, finely chop the lettuce and thinly slice the cucumbers.",
-    },
-    {
-        "image": "https://img.freepik.com/free-photo/closeup-scarlet-macaw-from-side-view-scarlet-macaw-closeup-head_488145-3540.jpg?semt=ais_hybrid&w=740&q=80",
-        "text": "### Step 3: Combine and Dress 🥣 \n\nIn a large bowl, combine all the chopped vegetables. Add your protein source and generously drizzle with your preferred dressing. Toss everything together gently to ensure an even coating.",
-    },
-    {
-        "image": "https://img.freepik.com/free-photo/closeup-scarlet-macaw-from-side-view-scarlet-macaw-closeup-head_488145-3540.jpg?semt=ais_hybrid&w=740&q=80",
-        "text": "### Step 4: Serve and Enjoy! 🍽️ \n\nServe your delicious, freshly-made salad immediately. You can garnish with some croutons, seeds, or fresh herbs for an extra touch. Enjoy your healthy meal!",
-    },
-]
+# ini ganti dengan rag beneran dan embedding custom # <-- disini bay
+json_file_path = './data/raw/cookpad_recipe_ayam.json'
+with open(json_file_path, 'r', encoding='utf-8') as f:
+    recipes = json.load(f)
+recipes = recipes[:50]
+embeddings_all, embedings_ingredients = algorithm.generate_recipe_embeddings(
+    recipes)  # ini ganti sama inputan dari maneh
+
+# =============================================================
 
 
-def display_recipe():
-    """Generates the Gradio components for the recipe display."""
+def render_steps(input_text=None):
+    if not input_text or input_text.strip() == "":
+        return "<p>Please upload an image or enter some text to see the recipe steps.</p>"
+    result = algorithm.first_generate_recipe()
+    html = '<div class="scrollable-steps">'
+    for idx, step in enumerate(result['steps'], start=1):
+        html += f"""
+        <div class="step-item">
+            <img src="{step['images'][0]}" width="100"><br>
+            <div class="step-text">
+                <b>Step {idx}:</b> {step['text']}
+            </div>
+        </div>
+        """
+    html += "</div>"
+    return html
 
-    # Iterate through the list of recipe steps and yield a Markdown and an Image component for each.
-    # The 'gr.Markdown' component displays the text, and 'gr.Image' displays the image.
-    for step in recipe_steps:
-        with gr.Row():
-            # Use 'scale=1' to make the image smaller
-            gr.Image(
-                step["image"], label=f"Step {recipe_steps.index(step) + 1}", scale=1)
-            # Use 'scale=2' to make the text wider
-            gr.Markdown(step["text"], 2)
+
+def upload_file(file):
+    if file is None:
+        return None
+    return file.name  # kasih path biar bisa dipreview di gr.Image
 
 
-with gr.Blocks(title="A Simple Gradio Recipe") as demo:
-    gr.Markdown("# 🥗 Healthy Salad Recipe")
-    display_recipe()
+def text_replace(file):
+    model = MultimodalModel()
+    return model.generate(file)
+
+
+def generate_recipe(input_text):
+    # bikin HTML dari text
+    algorithm.reset()
+    embedding_input = algorithm.generate_input_embedding(
+        input_text)  # ini ganti sama model embedding yang maneh pake
+    algorithm.mapping_input(input_text, embedding_input)
+    algorithm.mapping_output(
+        recipes, embeddings_all, embedings_ingredients)
+    return render_steps(input_text), gr.update(visible=True), gr.update(visible=True)
+
+
+def next_recommendation(input_text, rating):
+    algorithm.rating_recipe(rating)
+    return render_steps(input_text)
+
+
+with gr.Blocks(
+    css="""
+    .scrollable-steps {
+        max-height: 400px;
+        overflow-y: auto;
+        border: 1px solid #ccc;
+        padding: 10px;
+        border-radius: 8px;
+    }
+    .step-item {
+        display: flex;
+        flex-direction: row;  /* bikin image sama text horizontal */
+        align-items: center;  /* biar rata tengah secara vertikal */
+        margin-bottom: 12px;
+        gap: 12px; /* jarak antar image & text */
+    }
+
+    .step-item img {
+        max-width: 120px;  /* atur ukuran gambar */
+        height: auto;
+        border-radius: 8px;
+    }
+
+    .step-item .step-text {
+        flex: 1; /* biar teks mengisi sisa space */
+    }
+    """
+) as demo:
+    with gr.Row():
+        with gr.Column(scale=1):
+            gr.Markdown("Recipe Recommendation Here")
+            uploader = gr.UploadButton("Upload a file", file_types=[
+                                       "image"], file_count="single")
+            preview = gr.Image(label="Uploaded Preview")
+            ingredients = gr.Textbox(
+                label="Type your ingredients here...", interactive=True)
+            generate_btn = gr.Button("Generate Recipe")
+            # hidden dulu
+
+        with gr.Column(scale=1):
+            steps_html = gr.HTML(render_steps(),
+                                 label="Steps will appear here")  # awalnya kosong
+            rating = gr.Slider(
+                minimum=1, maximum=5, step=1,
+                label="Rating For Recommendation",
+                value=3, interactive=True, visible=False
+            )
+            next_btn = gr.Button("Next Recommendation", visible=False)
+
+    uploader.upload(upload_file, uploader, preview)
+    uploader.upload(text_replace, uploader, ingredients)
+    # klik generate -> munculkan rating + next_btn
+    generate_btn.click(
+        generate_recipe,
+        inputs=[ingredients],
+        outputs=[steps_html, rating, next_btn]
+    )
+
+    # klik next recommendation
+    next_btn.click(
+        next_recommendation,
+        inputs=[ingredients, rating],
+        outputs=[steps_html]
+    )
 
 demo.launch()
