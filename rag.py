@@ -4,7 +4,7 @@ from AlgorithmClass import AlgorithmClass
 
 class Datahandle:
     def get_recipes(self):
-        # ini ganti dengan recipes lengkap
+        # ini ganti dengan recipes hasil rag
         json_file_path = './data/raw/cookpad_recipe_ayam.json'
         with open(json_file_path, 'r', encoding='utf-8') as f:
             recipes = json.load(f)
