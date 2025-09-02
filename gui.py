@@ -2,15 +2,15 @@ import json
 import gradio as gr
 from AlgorithmClass import AlgorithmClass
 from helper import MultimodalModel
+from rag import Datahandle
 algorithm = AlgorithmClass()
+data_handler = Datahandle()
 
 # ini ganti dengan rag beneran dan embedding custom # <-- disini bay
-json_file_path = './data/raw/cookpad_recipe_ayam.json'
-with open(json_file_path, 'r', encoding='utf-8') as f:
-    recipes = json.load(f)
-recipes = recipes[:50]
-embeddings_all, embedings_ingredients = algorithm.generate_recipe_embeddings(
-    recipes)  # ini ganti sama inputan dari maneh
+
+recipes = data_handler.get_recipes()
+embeddings_all, embedings_ingredients = data_handler.get_embeddings_recipe(
+    recipes)
 
 # =============================================================
 
@@ -47,8 +47,7 @@ def text_replace(file):
 def generate_recipe(input_text):
     # bikin HTML dari text
     algorithm.reset()
-    embedding_input = algorithm.generate_input_embedding(
-        input_text)  # ini ganti sama model embedding yang maneh pake
+    embedding_input = data_handler.get_embeddings_input(input_text)
     algorithm.mapping_input(input_text, embedding_input)
     algorithm.mapping_output(
         recipes, embeddings_all, embedings_ingredients)
@@ -103,7 +102,7 @@ with gr.Blocks(
             steps_html = gr.HTML(render_steps(),
                                  label="Steps will appear here")  # awalnya kosong
             rating = gr.Slider(
-                minimum=1, maximum=5, step=1,
+                minimum=-5, maximum=5, step=1,
                 label="Rating For Recommendation",
                 value=3, interactive=True, visible=False
             )
