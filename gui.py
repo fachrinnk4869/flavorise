@@ -8,9 +8,6 @@ data_handler = Datahandle()
 
 # ini ganti dengan rag beneran dan embedding custom # <-- disini bay
 
-recipes = data_handler.get_recipes()
-embeddings_all, embedings_ingredients = data_handler.get_embeddings_recipe(
-    recipes)
 
 # =============================================================
 
@@ -21,9 +18,10 @@ def render_steps(input_text=None):
     result = algorithm.first_generate_recipe()
     html = '<div class="scrollable-steps">'
     for idx, step in enumerate(result['steps'], start=1):
+        first_image = step['images'][0] if step['images'] else None
         html += f"""
         <div class="step-item">
-            <img src="{step['images'][0]}" width="100"><br>
+            <img src="{first_image}" width="100"><br>
             <div class="step-text">
                 <b>Step {idx}:</b> {step['text']}
             </div>
@@ -48,7 +46,13 @@ def generate_recipe(input_text):
     # bikin HTML dari text
     algorithm.reset()
     embedding_input = data_handler.get_embeddings_input(input_text)
+
     algorithm.mapping_input(input_text, embedding_input)
+    recipes = data_handler.get_recipes()
+
+    embeddings_all, embedings_ingredients = data_handler.get_embeddings_recipe(
+        recipes)
+
     algorithm.mapping_output(
         recipes, embeddings_all, embedings_ingredients)
     return render_steps(input_text), gr.update(visible=True), gr.update(visible=True)
@@ -85,6 +89,13 @@ with gr.Blocks(
     .step-item .step-text {
         flex: 1; /* biar teks mengisi sisa space */
     }
+    .flip-container { position: relative; }
+    .flip-btn {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        z-index: 10;
+    }
     """
 ) as demo:
     with gr.Row():
@@ -98,13 +109,16 @@ with gr.Blocks(
             generate_btn = gr.Button("Generate Recipe")
             # hidden dulu
 
-        with gr.Column(scale=1):
+        with gr.Column(scale=1
+                       #    , elem_classes="flip-container"
+                       ):
             steps_html = gr.HTML(render_steps(),
                                  label="Steps will appear here")  # awalnya kosong
+            # flip_btn = gr.Button("⮂ Flip", elem_classes="flip-btn")
             rating = gr.Slider(
                 minimum=-5, maximum=5, step=1,
                 label="Rating For Recommendation",
-                value=3, interactive=True, visible=False
+                value=0, interactive=True, visible=False
             )
             next_btn = gr.Button("Next Recommendation", visible=False)
 
