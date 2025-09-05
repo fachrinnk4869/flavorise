@@ -11,23 +11,138 @@ data_handler = Datahandle()
 
 # =============================================================
 
+# --- Bagian 1: Definisikan JavaScript secara terpisah ---
+# JavaScript ini akan mengamati perubahan pada DOM.
+# Ketika carousel kita ditambahkan oleh Gradio, script ini akan berjalan
+# dan membuat tombolnya fungsional.
+javascript_code = """
+() => {
+    // Fungsi untuk menginisialisasi carousel
+    function setupCarousel(carouselContainer) {
+        if (carouselContainer.querySelector('.prev-btn')) {
+            let slideIndex = 0;
+            const slides = carouselContainer.getElementsByClassName("carousel-slide");
+            const prevBtn = carouselContainer.querySelector(".prev-btn");
+            const nextBtn = carouselContainer.querySelector(".next-btn");
+
+            const showSlide = (n) => {
+                for (let i = 0; i < slides.length; i++) {
+                    slides[i].style.display = "none";
+                }
+                slides[n].style.display = "block";
+            };
+
+            prevBtn.onclick = () => {
+                slideIndex = (slideIndex - 1 + slides.length) % slides.length;
+                showSlide(slideIndex);
+            };
+
+            nextBtn.onclick = () => {
+                slideIndex = (slideIndex + 1) % slides.length;
+                showSlide(slideIndex);
+            };
+
+            showSlide(slideIndex);
+        }
+    }
+
+    // Gunakan MutationObserver untuk mendeteksi kapan Gradio menambahkan HTML carousel
+    const observer = new MutationObserver((mutationsList, observer) => {
+        for(const mutation of mutationsList) {
+            if (mutation.type === 'childList') {
+                const carousel = document.querySelector('.carousel-container');
+                if (carousel) {
+                    setupCarousel(carousel);
+                    // observer.disconnect(); // Opsional: hentikan pengamatan jika hanya perlu sekali
+                }
+            }
+        }
+    });
+
+    // Mulai mengamati perubahan pada body dokumen
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    // Coba jalankan sekali saat awal, siapa tahu elemennya sudah ada
+    const initialCarousel = document.querySelector('.carousel-container');
+    if (initialCarousel) {
+        setupCarousel(initialCarousel);
+    }
+}
+"""
+# --- Bagian 2: Fungsi Logika untuk Menghasilkan HTML ---
+# Fungsi ini SEKARANG menerima input dari UI Gradio.
+# Perhatikan tidak ada lagi tag <script> di sini.
+
 
 def render_steps(input_text=None):
     if not input_text or input_text.strip() == "":
-        return "<p>Please upload an image or enter some text to see the recipe steps.</p>"
-    result = algorithm.first_generate_recipe()
-    html = '<div class="scrollable-steps">'
+        return "<p>Please enter some text and press 'Generate' to see the recipe.</p>"
+
+    # Simulasi hasil dari algoritma Anda
+    result = algorithm.get_recipe()
+
+    # Ambil data
+    cover_img = result.get("image")
+    title = result.get("title")
+    ingredients = result.get("ingredients", [])
+
+    # Slide 1: Cover
+    slide1 = f"""
+    <div class="carousel-slide">
+        <img src="{cover_img}" class="cover-img">
+        <h2>{title}</h2>
+    </div>
+    """
+
+    # Slide 2: Ingredients
+    ing_html = "".join([f"<li>{ing}</li>" for ing in ingredients])
+    slide2 = f"""
+    <div class="carousel-slide ingredients-scroll">
+        <h3>Ingredients</h3>
+        <ul>{ing_html}</ul>
+    </div>
+    """
+
+    # Slide 3: Steps
+    steps_html_content = ""
     for idx, step in enumerate(result['steps'], start=1):
-        first_image = step['images'][0] if step['images'] else None
-        html += f"""
+        # --- Bagian Baru ---
+        # 1. Buat blok HTML khusus untuk gambar-gambar
+        images_html = ""
+        # Pastikan ada gambar sebelum melakukan loop
+        if step['images']:
+            # Loop melalui SETIAP URL gambar di dalam list step['images']
+            for img_url in step['images']:
+                images_html += f'<img src="{img_url}" class="step-image" alt="Image for step {idx}">'
+
+        # 2. Gabungkan blok gambar dengan teks langkah dalam satu item
+        steps_html_content += f"""
         <div class="step-item">
-            <img src="{first_image}" width="100"><br>
+            <div class="step-images-container">
+                {images_html}
+            </div>
             <div class="step-text">
                 <b>Step {idx}:</b> {step['text']}
             </div>
         </div>
         """
-    html += "</div>"
+    slide3 = f"""
+    <div class="carousel-slide">
+        <h3>Steps</h3>
+        <div class="steps-scroll">{steps_html_content}</div>
+    </div>
+    """
+
+    # Gabungkan jadi carousel (tanpa <style> dan <script>)
+    html = f"""
+    <div class="carousel-container">
+        {slide1}
+        {slide2}
+        {slide3}
+        <button class="prev-btn">&#10094;</button>
+        <button class="next-btn">&#10095;</button>
+    </div>
+    """
     return html
 
 
@@ -55,6 +170,7 @@ def generate_recipe(input_text):
 
     algorithm.mapping_output(
         recipes, embeddings_all, embedings_ingredients)
+    algorithm.first_generate_recipe()
     return render_steps(input_text), gr.update(visible=True), gr.update(visible=True)
 
 
@@ -63,41 +179,45 @@ def next_recommendation(input_text, rating):
     return render_steps(input_text)
 
 
-with gr.Blocks(
-    css="""
-    .scrollable-steps {
-        max-height: 400px;
-        overflow-y: auto;
-        border: 1px solid #ccc;
-        padding: 10px;
-        border-radius: 8px;
+with gr.Blocks(js=javascript_code,
+               css="""
+    .step-images-container {
+        display: flex;         /* Kunci utama: membuat item di dalamnya berbaris horizontal */
+        flex-direction: row;   /* Mengatur arah baris (default) */
+        flex-wrap: wrap;       /* Izinkan gambar pindah ke baris baru jika tidak muat */
+        gap: 8px;              /* Memberi jarak antar gambar */
+        margin-bottom: 12px;   /* Memberi jarak antara baris gambar dan teks di bawahnya */
     }
+
+    /* Styling untuk setiap gambar individu */
+    .step-image {
+        height: 90px;          /* Atur tinggi gambar agar seragam */
+        width: 120px;
+        object-fit: cover;     /* Mencegah gambar menjadi gepeng/penyok */
+        border-radius: 8px;    /* Membuat sudut gambar melengkung */
+    }
+
+    /* Sedikit penyesuaian pada step-item dan step-text */
     .step-item {
-        display: flex;
-        flex-direction: row;  /* bikin image sama text horizontal */
-        align-items: center;  /* biar rata tengah secara vertikal */
-        margin-bottom: 12px;
-        gap: 12px; /* jarak antar image & text */
+        margin-bottom: 20px; /* Jarak antar langkah */
+    }
+    .step-text {
+        text-align: left;
     }
 
-    .step-item img {
-        max-width: 120px;  /* atur ukuran gambar */
-        height: auto;
-        border-radius: 8px;
-    }
+    .step-item img { border-radius: 8px; float: left; margin-right: 10px; }
 
-    .step-item .step-text {
-        flex: 1; /* biar teks mengisi sisa space */
-    }
-    .flip-container { position: relative; }
-    .flip-btn {
-        position: absolute;
-        top: 10px;
-        right: 10px;
-        z-index: 10;
-    }
+    .carousel-container { position: relative; width: 100%; margin: auto; overflow: hidden; border: 1px solid #ddd; border-radius: 12px; height: 400px;}
+    .carousel-slide { display: none; text-align: center; padding: 20px; }
+    .cover-img { max-width: 100%; border-radius: 12px; }
+    .ingredients-scroll { max-height: 400px; overflow-y: auto; text-align: left; }
+    .steps-scroll { max-height: 300px; overflow-y: auto; text-align: left; }
+    ul { list-style-position: inside; text-align: left; }
+    .prev-btn, .next-btn { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,0.5); color: white; border: none; padding: 8px 12px; cursor: pointer; border-radius: 50%; z-index: 10; }
+    .prev-btn { left: 10px; }
+    .next-btn { right: 10px; }
     """
-) as demo:
+               ) as demo:
     with gr.Row():
         with gr.Column(scale=1):
             gr.Markdown("Recipe Recommendation Here")
@@ -110,11 +230,9 @@ with gr.Blocks(
             # hidden dulu
 
         with gr.Column(scale=1
-                       #    , elem_classes="flip-container"
                        ):
             steps_html = gr.HTML(render_steps(),
                                  label="Steps will appear here")  # awalnya kosong
-            # flip_btn = gr.Button("⮂ Flip", elem_classes="flip-btn")
             rating = gr.Slider(
                 minimum=-5, maximum=5, step=1,
                 label="Rating For Recommendation",
