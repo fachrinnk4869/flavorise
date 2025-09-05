@@ -28,20 +28,13 @@ class AlgorithmClass:
 
     def generate_recipe_embeddings(self, recipes: List[dict]):
         ''' Digunakan untuk generate embedding dari list of recipes'''
-        # create embedding for all metadata
-        embeding_model = SentenceTransformer(
-            'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2')
-        recipe_texts = [
-            recipe['title'] + ' ' +
-            " ".join(recipe['ingredients']) + ' ' +
-            " ".join(step['text'] for step in recipe["steps"])
-            for recipe in recipes
-        ]
-        embeddings = embeding_model.encode(recipe_texts)
-        # crate embedding for ingredients only
-        embeding_ingredients = embeding_model.encode(
-            [" ".join(recipe['ingredients']) for recipe in recipes])
-        return embeddings, embeding_ingredients
+        embeddings_all = []
+        embeding_ingredients = []
+        for recipe in recipes:
+            if(('vector_all' in recipe) and ('values' in recipe)):
+                embeddings_all.append(recipe['vector_all'] or [])
+                embeding_ingredients.append(recipe['values'] or [])
+        return embeddings_all, embeding_ingredients
 
     def generate_input_embedding(self, text_input: str):
         embedding_input = get_dense_embeddings(text_input)
@@ -131,7 +124,16 @@ class AlgorithmClass:
         return bests
 
     def rerank_ingredients(self, embed_all, embed_ingredients, lambd=0.7):
-        return embed_ingredients * lambd + embed_all * (1 - lambd)
+        if not (0.0 <= lambd <= 1.0):
+            raise ValueError("lambd must be in [0, 1]")
+
+        e1 = np.asarray(embed_ingredients, dtype=np.float32)
+        e2 = np.asarray(embed_all, dtype=np.float32)
+        if e1.shape != e2.shape:
+            raise ValueError(f"Shape mismatch: {e1.shape} vs {e2.shape}")
+
+        out = lambd * e1 + (1.0 - lambd) * e2
+        return out
 
     def matching_algorithm(self, list_rag) -> List[str]:
         # Dummy implementation of the matching algorithm

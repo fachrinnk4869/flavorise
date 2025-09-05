@@ -1,14 +1,13 @@
 import json
 from AlgorithmClass import AlgorithmClass
+from pipeline.rag_pipeline import RAG_pipeline
 
 
 class Datahandle:
-    def get_recipes(self):
-        # ini ganti dengan recipes hasil rag
-        json_file_path = './data/raw/cookpad_recipe_ayam.json'
-        with open(json_file_path, 'r', encoding='utf-8') as f:
-            recipes = json.load(f)
-        return recipes[:2]
+    def get_recipes(self, query: str):
+        # get top 50 recipe based on query from vector db
+        output_recipes = RAG_pipeline(query)
+        return output_recipes
 
     # ini ganti sama embedding sesuai maneh pake model apa untuk embeddingnya
     def get_embeddings_input(self, text_input):

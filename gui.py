@@ -163,7 +163,7 @@ def generate_recipe(input_text):
     embedding_input = data_handler.get_embeddings_input(input_text)
 
     algorithm.mapping_input(input_text, embedding_input)
-    recipes = data_handler.get_recipes()
+    recipes = data_handler.get_recipes(input_text)
 
     embeddings_all, embedings_ingredients = data_handler.get_embeddings_recipe(
         recipes)
