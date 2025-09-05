@@ -7,6 +7,7 @@ from functools import lru_cache
 from pinecone.grpc import PineconeGRPC as Pinecone
 from pipeline.get_embedding import get_dense_embeddings, get_sparse_embeddings
 from pipeline.bm25_model import load_bm25_model
+import numpy as np
 
 # Suppress logging warnings
 os.environ["GRPC_VERBOSITY"] = "ERROR"
@@ -26,6 +27,7 @@ NAMESPACE2 = os.getenv('NAMESPACE2')
 TOP_K = 50
 EMBED_DIM = int(os.getenv('EMBED_DIM')) if os.getenv('EMBED_DIM') else 1024
 RECIPES_FOLDER = 'data/clean'
+SIMILARITY_THRESHOLD = 0.7
 
 # config
 pc = Pinecone(api_key=PINECONE_API_KEY)
@@ -43,14 +45,23 @@ def search_dense_index(text: str):
         include_values=True
     )
     matches = dense_response.get("matches", []) or []
-    return [{
+    results = [{
         "id": item.get("id"),
         "similarity": item.get('score', 0.0),
-        "category": item['metadata'].get("category", ''),
-        "values": item['values']
+        "category": (item.get('metadata') or {}).get("category", ''),
+        "values": item.get('values')
     } for item in matches]
 
-def _fetch_dense_values_by_ids(ids):
+    # filter threshold
+    if any((r.get("similarity") or 0.0) > SIMILARITY_THRESHOLD for r in results):
+        results = [r for r in results if (r.get("similarity") or 0.0) > SIMILARITY_THRESHOLD]
+
+    return results
+
+def cosine_similarity(a, b):
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+def _fetch_dense_values_by_ids(ids, query_vec=None):
     """
     Ambil dense embedding values dari index_dense untuk sekumpulan ID.
     Return: dict[id] -> values (list of floats)
@@ -71,6 +82,7 @@ def _fetch_dense_values_by_ids(ids):
 
     # Ekstrak values
     out = {}
+    sim = {}
     for _id, rec in vectors_map.items():
         if not rec:
             continue
@@ -79,8 +91,9 @@ def _fetch_dense_values_by_ids(ids):
             values = (rec.get("vector") or {}).get("values")
         if values is not None:
             out[_id] = values
+            sim[_id] = cosine_similarity(values, query_vec)
     
-    return out
+    return out, sim
 
 def search_sparse_index(text: str):
     sp = get_sparse_embeddings(text=text, bm25_model=bm25, query_type='search')
@@ -97,7 +110,8 @@ def search_sparse_index(text: str):
     ids = [m.get("id") for m in matches if m.get("id")]
 
     # fetch dense embedding from id above
-    id_to_dense_values = _fetch_dense_values_by_ids(ids)
+    query_dense_vec = get_dense_embeddings(text, EMBED_DIM)
+    id_to_dense_values, id_to_sim = _fetch_dense_values_by_ids(ids, query_dense_vec)
 
     # map output
     results = []
@@ -105,10 +119,15 @@ def search_sparse_index(text: str):
         _id = item.get("id")
         results.append({
             "id": _id,
-            "similarity": item.get("score", 0.0),
+            "similarity": id_to_sim.get(_id, 0.0),
             "category": (item.get("metadata") or {}).get("category", ''),
             "values": id_to_dense_values.get(_id)
         })
+
+    # filter threshold
+    if any((r.get("similarity") or 0.0) > SIMILARITY_THRESHOLD for r in results):
+        results = [r for r in results if (r.get("similarity") or 0.0) > SIMILARITY_THRESHOLD]
+
     return results
 
 """
@@ -151,7 +170,6 @@ def _build_recipe_lookup(folder_path: str):
     lookup = {}
     if not folder_path or not os.path.isdir(folder_path):
         return lookup
-
 
     try:
         with os.scandir(folder_path) as it:
