@@ -1,5 +1,6 @@
 from typing import List
 import numpy as np
+from pipeline.get_embedding import get_dense_embeddings
 # from sklearn.metrics.pairwise import cosine_similarity
 
 # --------------------------
@@ -7,7 +8,6 @@ import numpy as np
 # --------------------------
 from mapping import MappingOutput
 import json
-from sentence_transformers import SentenceTransformer
 
 
 class AlgorithmClass:
@@ -28,7 +28,6 @@ class AlgorithmClass:
     def generate_recipe_embeddings(self, recipes: List[dict]):
         ''' Digunakan untuk generate embedding dari list of recipes'''
         # create embedding for all metadata
-        embed_dim = 384  # for MiniLM-L12-v2
         embeding_model = SentenceTransformer(
             'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2')
         recipe_texts = [
@@ -44,9 +43,7 @@ class AlgorithmClass:
         return embeddings, embeding_ingredients
 
     def generate_input_embedding(self, text_input: str):
-        embeding_model = SentenceTransformer(
-            'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2')
-        embedding_input = embeding_model.encode([text_input])[0]
+        embedding_input = get_dense_embeddings(text_input)
         return embedding_input
 
     def mapping_input(self, text_input, embedding_input=None):
