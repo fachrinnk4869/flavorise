@@ -19,6 +19,7 @@ class AlgorithmClass:
         self.selected = []
         self.user_pref = None
         self.candidates = []
+        self.current_recipe = None
 
     def reset(self):
         self.selected = []
@@ -75,20 +76,29 @@ class AlgorithmClass:
         self.candidates = mapping_result.copy()
         return mapping_result
 
+    def get_recipe(self):
+        return self.current_recipe
+
     def first_generate_recipe(self):
         return self.rating_recipe(rating=0)
 
     def rating_recipe(self, rating):
         """Update preferensi user berdasarkan rating (0-1)."""
         # print("selected:", selected)
-        reranked = self.mmr_rerank(lambd=0.7, top_k=1)[0]
+        try:
+            reranked = self.mmr_rerank(lambd=0.7, top_k=1)[0]
+        except IndexError:
+            self.candidates = self.selected.copy()
+            self.selected = []
+            reranked = self.mmr_rerank(lambd=0.7, top_k=1)[0]
         # hanya rating top-1
         # print(f"\nIterasi {step+1}")
         # print(f"{reranked.title}. {step}")
         # print(f"Berikan rating untuk {top1_name} (-5->5): {rating[step]} ")
         self.user_pref = self.update_user_pref(
             self.user_pref, reranked.final_vector, rating, lr=0.8)
-        return {
+
+        self.current_recipe = {
             "steps": reranked.steps,
             "ingredients": reranked.ingredients,
             "image": reranked.image,

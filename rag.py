@@ -8,7 +8,7 @@ class Datahandle:
         json_file_path = './data/raw/cookpad_recipe_ayam.json'
         with open(json_file_path, 'r', encoding='utf-8') as f:
             recipes = json.load(f)
-        return recipes[:50]
+        return recipes[:2]
 
     # ini ganti sama embedding sesuai maneh pake model apa untuk embeddingnya
     def get_embeddings_input(self, text_input):
