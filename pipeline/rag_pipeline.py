@@ -1,11 +1,9 @@
 # pipeline/rag_pipeline.py
 import os
 from collections import defaultdict
-
-import asyncio
 from dotenv import load_dotenv
-from tenacity import retry, stop_after_attempt, wait_exponential
-
+import json
+from functools import lru_cache
 from pinecone.grpc import PineconeGRPC as Pinecone
 from pipeline.get_embedding import get_dense_embeddings, get_sparse_embeddings
 from pipeline.bm25_model import load_bm25_model
@@ -24,8 +22,10 @@ SILICONFLOW_URL_RERANK = os.getenv('SILICONFLOW_URL_RERANK')
 SILICONFLOW_API_KEY = os.getenv('SILICONFLOW_API_KEY')
 
 NAMESPACE = os.getenv('NAMESPACE')
-TOP_K = 10
+NAMESPACE2 = os.getenv('NAMESPACE2')
+TOP_K = 50
 EMBED_DIM = int(os.getenv('EMBED_DIM')) if os.getenv('EMBED_DIM') else 1024
+RECIPES_FOLDER = 'data/clean'
 
 # config
 pc = Pinecone(api_key=PINECONE_API_KEY)
@@ -33,48 +33,83 @@ index_dense = pc.Index(name=NAME_PINECONE_DENSE)
 index_sparse = pc.Index(name=NAME_PINECONE_SPARSE)
 bm25 = load_bm25_model()
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=6), reraise=True)
-async def _pinecone_query_dense(vector):
-    return await asyncio.to_thread(
-        index_dense.query,
+def search_dense_index(text: str):
+    vec = get_dense_embeddings(text, EMBED_DIM)
+    dense_response = index_dense.query(
         namespace=NAMESPACE,
-        vector=vector,
+        vector= vec,
         top_k=TOP_K,
         include_metadata=True,
-        include_values=False,
+        include_values=True
     )
-    
-
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=6), reraise=True)
-async def _pinecone_query_sparse(sparse_vector):
-    return await asyncio.to_thread(
-        index_sparse.query,
-        namespace=NAMESPACE,
-        sparse_vector=sparse_vector,
-        top_k=TOP_K,
-        include_metadata=True,
-        include_values=False
-    )
-
-async def search_dense_index_async(text: str):
-    vec = await get_dense_embeddings(text, EMBED_DIM)
-    dense_response = await _pinecone_query_dense(vec)
     matches = dense_response.get("matches", []) or []
     return [{
         "id": item.get("id"),
         "similarity": item.get('score', 0.0),
         "category": item['metadata'].get("category", ''),
+        "values": item['values']
     } for item in matches]
 
-async def search_sparse_index_async(text: str):
+def _fetch_dense_values_by_ids(ids):
+    """
+    Ambil dense embedding values dari index_dense untuk sekumpulan ID.
+    Return: dict[id] -> values (list of floats)
+    """
+    if not ids:
+        return {}
+
+    dense_fetch = index_dense.fetch(ids=ids, namespace=NAMESPACE) or {}
+
+    vectors_obj = dense_fetch.vectors or {}
+
+    if isinstance(vectors_obj, dict):
+        vectors_map = vectors_obj
+    elif isinstance(vectors_obj, list):
+        vectors_map = {v.get("id"): v for v in vectors_obj if v and v.get("id")}
+    else:
+        vectors_map = {}
+
+    # Ekstrak values
+    out = {}
+    for _id, rec in vectors_map.items():
+        if not rec:
+            continue
+        values = rec.get("values")
+        if values is None:
+            values = (rec.get("vector") or {}).get("values")
+        if values is not None:
+            out[_id] = values
+    
+    return out
+
+def search_sparse_index(text: str):
     sp = get_sparse_embeddings(text=text, bm25_model=bm25, query_type='search')
-    sparse_response = await _pinecone_query_sparse(sp)
+    sparse_response = index_sparse.query(
+        namespace=NAMESPACE,
+        sparse_vector=sp,
+        top_k=TOP_K,
+        include_metadata=True,
+        include_values=False
+    )
     matches = sparse_response.get("matches", []) or []
-    return [{
-        "id": item.get("id"),
-        "similarity": item.get('score', 0.0),
-        "category": item['metadata'].get("category", ''),
-    } for item in matches]
+
+    # get id from sparse search
+    ids = [m.get("id") for m in matches if m.get("id")]
+
+    # fetch dense embedding from id above
+    id_to_dense_values = _fetch_dense_values_by_ids(ids)
+
+    # map output
+    results = []
+    for item in matches:
+        _id = item.get("id")
+        results.append({
+            "id": _id,
+            "similarity": item.get("score", 0.0),
+            "category": (item.get("metadata") or {}).get("category", ''),
+            "values": id_to_dense_values.get(_id)
+        })
+    return results
 
 """
 RRF score(d) = Σ 1/(k+rank(d)) where k is between 1-60 where d is document
@@ -99,15 +134,93 @@ def rrf_fusion(dense_results, sparse_results, k=60, top_n=TOP_K):
 
     return fused_results
 
-async def RAG_pipeline_async(query: str):
-    # create task to search data from pinecone simultaneously
-    dense_results, sparse_results = await asyncio.gather(
-        search_dense_index_async(query),
-        search_sparse_index_async(query),
-        return_exceptions=False,
-    )
+def batch_fetch_all_vectors(ids):
+    """Fetch the ALL-TEXT vectors for a list of IDs from NAMESPACE2 in one RPC.
+    Returns a dict: id -> {id, values, metadata}
+    """
+    if not ids:
+        return {}
+    if not NAMESPACE2:
+        return {}
+
+    fetched = index_dense.fetch(ids=ids, namespace=NAMESPACE2)
+    return fetched.vectors
+
+@lru_cache(maxsize=1)
+def _build_recipe_lookup(folder_path: str):
+    lookup = {}
+    if not folder_path or not os.path.isdir(folder_path):
+        return lookup
+
+
+    try:
+        with os.scandir(folder_path) as it:
+            for entry in it:
+                if not entry.is_file() or not entry.name.endswith('.json'):
+                    continue
+                try:
+                    with open(entry.path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                except Exception:
+                    continue
+
+                items = data if isinstance(data, list) else [data]
+                for obj in items:
+                    if not isinstance(obj, dict):
+                        continue
+                    rid = obj.get('id')
+                    if not rid:
+                        continue
+                    lookup[rid] = {
+                        'url': obj.get('url'),
+                        'title': obj.get('title'),
+                        'image': obj.get('image'),
+                        'ingredients': obj.get('ingredients'),
+                        'steps': obj.get('steps'),
+                    }
+    except Exception:
+        return lookup
+
+    return lookup
+
+def RAG_pipeline(query: str):
+    # get vector ingre
+    dense_results = search_dense_index(query)
+    sparse_results = search_sparse_index(query)
 
     # fusion filter and non filter result
     fused_results = rrf_fusion(dense_results, sparse_results)
 
-    return fused_results
+    # get vector all based on id from vector ingre
+    ids = [r['id'] for r in fused_results]
+    fetched_all = batch_fetch_all_vectors(ids)
+
+    # read all recipe json data
+    recipe_lookup = _build_recipe_lookup(RECIPES_FOLDER)
+
+    # concat vector ingre and vector all
+    all_data = []
+    for r in fused_results:
+        all_payload = fetched_all.get(r['id'])
+        if all_payload:
+            r['vector_all'] = all_payload.get('values')
+        else:
+            print(all_payload)
+            r['vector_all'] = None
+
+        recipe = recipe_lookup.get(r['id'])
+        if recipe:
+            r['url'] = recipe.get('url')
+            r['title'] = recipe.get('title')
+            r['image'] = recipe.get('image')
+            r['ingredients'] = recipe.get('ingredients')
+            r['steps'] = recipe.get('steps')
+        else:
+            r['url'] = None
+            r['title'] = None
+            r['image'] = None
+            r['ingredients'] = None
+            r['steps'] = None
+        all_data.append(r)
+
+    return all_data
