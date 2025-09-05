@@ -1,9 +1,8 @@
 # pipeline/get_embedding.py
 import os
 from dotenv import load_dotenv
-from tenacity import retry, stop_after_attempt, wait_exponential
 from pinecone_text.sparse import BM25Encoder
-import httpx
+import requests
 
 load_dotenv()
 
@@ -21,8 +20,7 @@ headers = {
     "Content-Type": "application/json",
 }
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10), reraise=True)
-async def get_dense_embeddings(text: str, dim_size: int = EMBED_DIM) -> list[float]:
+def get_dense_embeddings(text: str, dim_size: int = EMBED_DIM) -> list[float]:
     dim = dim_size or EMBED_DIM or 1024
     payload = {
         "model": "Qwen/Qwen3-Embedding-8B",
@@ -31,19 +29,33 @@ async def get_dense_embeddings(text: str, dim_size: int = EMBED_DIM) -> list[flo
         "dimensions": dim,
     }
 
-    async with httpx.AsyncClient(timeout=20) as client:
-        response = await client.post(
+    try:
+        response = requests.post(
             SILICONFLOW_URL_EMBEDDING,
             json=payload,
-            headers=headers,
-            timeout=20,
+            headers=headers
         )
-        
-    response.raise_for_status()
-    data = response.json()
-    if "data" in data and data["data"]:
+        response.raise_for_status()
+
+        data = response.json()
+
+        # Validasi struktur response
+        if "data" not in data or not data["data"]:
+            raise ValueError("Response JSON tidak memiliki field 'data' atau kosong.")
+
+        if "embedding" not in data["data"][0]:
+            raise ValueError("Field 'embedding' tidak ditemukan di dalam 'data[0]'.")
+
         return data["data"][0]["embedding"]
-    raise ValueError("Invalid embedding response: missing 'data' or empty list")
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error HTTP: {e}")
+    except ValueError as e:
+        print(f"Error data: {e}")
+    except Exception as e:
+        print(f"Error tidak terduga: {e}")
+
+    return None
 
 def get_sparse_embeddings(text: str, bm25_model: BM25Encoder, query_type: str = "search"):
     if query_type == "upsert":
