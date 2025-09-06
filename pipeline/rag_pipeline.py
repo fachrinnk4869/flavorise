@@ -203,14 +203,14 @@ def _build_recipe_lookup(folder_path: str):
 
 def RAG_pipeline(query: str):
     # get vector ingre
-    dense_results = search_dense_index(query)
+    # dense_results = search_dense_index(query)
     sparse_results = search_sparse_index(query)
 
     # fusion filter and non filter result
-    fused_results = rrf_fusion(dense_results, sparse_results)
+    # fused_results = rrf_fusion(dense_results, sparse_results)
 
     # get vector all based on id from vector ingre
-    ids = [r['id'] for r in fused_results]
+    ids = [r['id'] for r in sparse_results]
     fetched_all = batch_fetch_all_vectors(ids)
 
     # read all recipe json data
@@ -218,12 +218,11 @@ def RAG_pipeline(query: str):
 
     # concat vector ingre and vector all
     all_data = []
-    for r in fused_results:
+    for r in sparse_results:
         all_payload = fetched_all.get(r['id'])
         if all_payload:
             r['vector_all'] = all_payload.get('values')
         else:
-            print(all_payload)
             r['vector_all'] = None
 
         recipe = recipe_lookup.get(r['id'])
