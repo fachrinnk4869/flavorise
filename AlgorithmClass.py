@@ -20,6 +20,7 @@ class AlgorithmClass:
         self.user_pref = None
         self.candidates = []
         self.current_recipe = None
+        self.current_item_embeddding = None
 
     def reset(self):
         self.selected = []
@@ -31,7 +32,7 @@ class AlgorithmClass:
         embeddings_all = []
         embeding_ingredients = []
         for recipe in recipes:
-            if(('vector_all' in recipe) and ('values' in recipe)):
+            if (('vector_all' in recipe) and ('values' in recipe)):
                 embeddings_all.append(recipe['vector_all'] or [])
                 embeding_ingredients.append(recipe['values'] or [])
         return embeddings_all, embeding_ingredients
@@ -59,7 +60,7 @@ class AlgorithmClass:
                           ingredients_vector=embeding_ingredients[i],
                           all_vector=embeddings[i],
                           final_vector=self.rerank_ingredients(
-                              embeddings[i], embeding_ingredients[i], lambd=0.9)
+                              embeddings[i], embeding_ingredients[i], lambd=0.5)
                           )
             for i, recipe in enumerate(recipes)
         ]
@@ -75,19 +76,16 @@ class AlgorithmClass:
     def rating_recipe(self, rating):
         """Update preferensi user berdasarkan rating (0-1)."""
         # print("selected:", selected)
-        try:
-            reranked = self.mmr_rerank(lambd=0.7, top_k=1)[0]
-        except IndexError:
+        self.user_pref = self.update_user_pref(
+            self.user_pref, self.current_item_embeddding, rating, lr=0.1)
+
+        if self.candidates == []:
             self.candidates = self.selected.copy()
             self.selected = []
-            reranked = self.mmr_rerank(lambd=0.7, top_k=1)[0]
-        # hanya rating top-1
-        # print(f"\nIterasi {step+1}")
-        # print(f"{reranked.title}. {step}")
-        # print(f"Berikan rating untuk {top1_name} (-5->5): {rating[step]} ")
-        self.user_pref = self.update_user_pref(
-            self.user_pref, reranked.final_vector, rating, lr=0.8)
 
+        reranked = self.mmr_rerank(lambd=0.99, top_k=1)[0]
+        # curently selected item
+        self.current_item_embeddding = reranked.final_vector
         self.current_recipe = {
             "steps": reranked.steps,
             "ingredients": reranked.ingredients,
@@ -102,6 +100,8 @@ class AlgorithmClass:
         """Update preferensi user berdasarkan rating (-5 - 5)."""
         # print(item_embedding)
         # print(user_pref)
+        if rating == 0:
+            return user_pref
         return user_pref + lr * rating * (item_embedding - user_pref)
 
     def mmr_rerank(self, lambd=0.7, top_k=1):
