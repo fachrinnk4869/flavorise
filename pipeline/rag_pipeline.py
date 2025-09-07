@@ -67,7 +67,7 @@ def _fetch_dense_values_by_ids(ids, query_vec=None):
     Return: dict[id] -> values (list of floats)
     """
     if not ids:
-        return {}
+        return {}, {}
 
     dense_fetch = index_dense.fetch(ids=ids, namespace=NAMESPACE) or {}
 
@@ -202,42 +202,52 @@ def _build_recipe_lookup(folder_path: str):
     return lookup
 
 def RAG_pipeline(query: str):
-    # get vector ingre
-    # dense_results = search_dense_index(query)
+    # 1. Try sparse search first
     sparse_results = search_sparse_index(query)
-
-    # fusion filter and non filter result
-    # fused_results = rrf_fusion(dense_results, sparse_results)
-
-    # get vector all based on id from vector ingre
+    results = sparse_results
     ids = [r['id'] for r in sparse_results]
+
+    # 2. Fallback: if no sparse matches, try dense search
+    if not ids:
+        dense_results = search_dense_index(query)
+        results = dense_results
+        ids = [r['id'] for r in dense_results]
+
+    # 3. If still no results, return []
+    if not ids:
+        return []
+
+    # 4. Fetch "all-text" vectors
     fetched_all = batch_fetch_all_vectors(ids)
 
-    # read all recipe json data
+    # 5. Load recipe metadata
     recipe_lookup = _build_recipe_lookup(RECIPES_FOLDER)
 
-    # concat vector ingre and vector all
+    # 6. Merge vectors + recipe metadata into results
     all_data = []
-    for r in sparse_results:
-        all_payload = fetched_all.get(r['id'])
-        if all_payload:
-            r['vector_all'] = all_payload.get('values')
-        else:
-            r['vector_all'] = None
+    for r in results:
+        _id = r['id']
+        all_payload = fetched_all.get(_id) if fetched_all else None
+        r['vector_all'] = all_payload.get('values') if all_payload else None
 
-        recipe = recipe_lookup.get(r['id'])
+        recipe = recipe_lookup.get(_id)
         if recipe:
-            r['url'] = recipe.get('url')
-            r['title'] = recipe.get('title')
-            r['image'] = recipe.get('image')
-            r['ingredients'] = recipe.get('ingredients')
-            r['steps'] = recipe.get('steps')
+            r.update({
+                'url': recipe.get('url'),
+                'title': recipe.get('title'),
+                'image': recipe.get('image'),
+                'ingredients': recipe.get('ingredients'),
+                'steps': recipe.get('steps'),
+            })
         else:
-            r['url'] = None
-            r['title'] = None
-            r['image'] = None
-            r['ingredients'] = None
-            r['steps'] = None
+            r.update({
+                'url': None,
+                'title': None,
+                'image': None,
+                'ingredients': None,
+                'steps': None,
+            })
+
         all_data.append(r)
 
     return all_data
