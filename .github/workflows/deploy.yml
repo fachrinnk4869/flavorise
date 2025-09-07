@@ -26,13 +26,16 @@ jobs:
         run: |
           docker build -t fachrinnk/flavourise:latest .
           docker push fachrinnk/flavourise:latest
-
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
       # Setup gcloud CLI
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
         with:
           project_id: flavourise
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          install_components: 'beta'
 
       # Deploy to Cloud Run
       - name: Deploy to Cloud Run
