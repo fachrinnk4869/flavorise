@@ -88,7 +88,7 @@ def render_steps(input_text=None):
 
     # Slide 1: Cover
     slide1 = f"""
-    <div class="carousel-slide">
+    <div class="carousel-slide main-scroll">
         <img src="{cover_img}" class="cover-img">
         <h2>{title}</h2>
     </div>
@@ -210,6 +210,7 @@ with gr.Blocks(js=javascript_code,
     .carousel-container { position: relative; width: 100%; margin: auto; overflow: hidden; border: 1px solid #ddd; border-radius: 12px; height: 400px;}
     .carousel-slide { display: none; text-align: center; padding: 20px; }
     .cover-img { max-width: 100%; border-radius: 12px; }
+    .main-scroll { max-height: 400px; overflow-y: auto; text-align: center; }
     .ingredients-scroll { max-height: 400px; overflow-y: auto; text-align: left; }
     .steps-scroll { max-height: 300px; overflow-y: auto; text-align: left; }
     ul { list-style-position: inside; text-align: left; }
@@ -256,4 +257,4 @@ with gr.Blocks(js=javascript_code,
         outputs=[steps_html]
     )
 
-demo.launch()
+demo.launch(server_name="0.0.0.0", server_port=7860)

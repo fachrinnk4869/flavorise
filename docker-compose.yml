@@ -1,0 +1,8 @@
+services:
+  app:
+    image: fachrinnk/flavourise:v0
+    ports:
+      - "7860:7860"
+    env_file:
+      - .env
+    restart: unless-stopped
